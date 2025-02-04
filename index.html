@@ -1,0 +1,447 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WU WANGZE AI 五子棋</title>
+  <style>
+    :root {
+      --primary-color: #2c3e50;
+      --secondary-color: #3498db;
+      --board-color: #f0d9b5;
+      --text-color: #34495e;
+    }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #ecf0f1;
+      color: var(--text-color);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .container {
+      width: 100%;
+      max-width: 600px;
+    }
+    h1 {
+      color: var(--primary-color);
+      margin: 0 0 20px;
+      font-size: 1.8em;
+      text-align: center;
+    }
+    #status {
+      background: #fff;
+      padding: 10px 20px;
+      border-radius: 25px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      margin-bottom: 15px;
+      font-weight: bold;
+      color: var(--secondary-color);
+      transition: all 0.3s ease;
+    }
+    #controls {
+      background: white;
+      padding: 15px;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      margin-bottom: 15px;
+    }
+    .control-group {
+      margin: 10px 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    button {
+      background: var(--secondary-color);
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-size: 0.9em;
+    }
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 3px 8px rgba(52, 152, 219, 0.4);
+    }
+    input[type="range"] {
+      width: 120px;
+      height: 4px;
+      background: #ddd;
+      border-radius: 2px;
+      -webkit-appearance: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      background: var(--secondary-color);
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    #boardContainer {
+      position: relative;
+      width: 100%;
+      margin: 0 auto;
+    }
+    #boardCanvas {
+      background-color: var(--board-color);
+      width: 100%;
+      height: auto;
+      touch-action: none;
+      border-radius: 8px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    }
+    @media (max-width: 600px) {
+      body { padding: 10px; }
+      #controls { padding: 10px; }
+      button { padding: 6px 12px; font-size: 0.85em; }
+    }
+    .ai-marker {
+      animation: pulse 1s ease-out;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 0.9; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>WU WANGZE AI 五子棋</h1>
+    <!-- 初始状态清空，由 initBoard 更新 -->
+    <div id="status"></div>
+    <div id="controls">
+      <div class="control-group">
+        难度：<input type="range" id="difficulty" min="1" max="5" value="3">
+        <span id="difficultyValue">3</span>
+      </div>
+      <div class="control-group">
+        先手：
+        <label><input type="radio" name="first" value="human" checked> 人类</label>
+        <label><input type="radio" name="first" value="ai"> AI</label>
+      </div>
+      <div class="control-group">
+        <button id="restartBtn">重新开始</button>
+        <button id="hintBtn">AI指导</button>
+      </div>
+    </div>
+    <div id="boardContainer">
+      <canvas id="boardCanvas"></canvas>
+    </div>
+  </div> 
+  <script>
+    const BOARD_SIZE = 15;
+    let CELL_SIZE = Math.min(window.innerWidth * 0.8 / BOARD_SIZE, 40);
+    const EMPTY = 0, BLACK = 1, WHITE = 2;
+    const WIN_SCORE = 1000000; 
+    const patternScore = [0, 10, 100, 1000, 10000, 100000];    
+    let canvasSize = CELL_SIZE * BOARD_SIZE;
+    let humanColor, aiColor;
+    let currentPlayer;
+    let gameOver = false;
+    let maxDepth = 3; 
+    let board = [];
+    let hintPosition = null;    
+    const canvas = document.getElementById("boardCanvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = canvasSize;
+    canvas.height = canvasSize;
+    function initBoard() {
+      board = Array(BOARD_SIZE).fill().map(() => Array(BOARD_SIZE).fill(EMPTY));
+      gameOver = false;
+      hintPosition = null;
+      maxDepth = parseInt(document.getElementById("difficulty").value) + 1;      
+      const isHumanFirst = document.querySelector('input[name="first"]:checked').value === 'human';
+      humanColor = isHumanFirst ? BLACK : WHITE;
+      aiColor = isHumanFirst ? WHITE : BLACK;
+      currentPlayer = isHumanFirst ? humanColor : aiColor;      
+      updateStatus();
+      drawBoard();      
+      if (currentPlayer === aiColor) {
+        setTimeout(aiMove, 100);
+      }
+    }    
+    function updateStatus() {
+      const status = document.getElementById("status");
+      if (gameOver) {
+        status.textContent = "游戏结束！";
+      } else if (currentPlayer === aiColor) {
+        status.textContent = "AI正在思考...";
+      } else {
+        status.textContent = "轮到您下棋";
+      }
+    }
+    document.getElementById("difficulty").addEventListener("input", function() {
+      document.getElementById("difficultyValue").innerText = this.value;
+    });
+    document.getElementById("restartBtn").addEventListener("click", initBoard);
+    document.getElementById("hintBtn").addEventListener("click", showHint);    
+    canvas.addEventListener('click', handleClick);
+    canvas.addEventListener('touchstart', handleTouch);   
+    function handleTouch(e) {
+      e.preventDefault();
+      const touch = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      handleMove(touch.clientX - rect.left, touch.clientY - rect.top);
+    }    
+    function handleClick(e) {
+      const rect = canvas.getBoundingClientRect();
+      handleMove(e.clientX - rect.left, e.clientY - rect.top);
+    }   
+    function handleMove(x, y) {
+      if (gameOver || currentPlayer !== humanColor) return;      
+      const cellSize = canvas.width / BOARD_SIZE;
+      const j = Math.floor(x / cellSize);
+      const i = Math.floor(y / cellSize);     
+      if (i >= 0 && i < BOARD_SIZE && j >= 0 && j < BOARD_SIZE && board[i][j] === EMPTY) {
+        makeMove(i, j, humanColor);
+      }
+    }
+    function makeMove(x, y, player) {
+      board[x][y] = player;
+      hintPosition = null;
+      drawBoard();     
+      if (isWinningMove(x, y, player)) {
+        gameOver = true;
+        updateStatus();
+        setTimeout(() => alert(player === humanColor ? "恭喜您获胜！" : "AI获胜！"), 10);
+        return;
+      }      
+      currentPlayer = (player === humanColor) ? aiColor : humanColor;
+      updateStatus();      
+      if (currentPlayer === aiColor && !gameOver) {
+        setTimeout(aiMove, 100);
+      }
+    }
+    function aiMove() {
+      if (gameOver) return;
+      const bestMove = searchBestMove(aiColor, maxDepth);
+      if (bestMove) {
+        finalizeAiMove(bestMove);
+      }
+    }   
+    function finalizeAiMove(move) {
+      makeMove(move.x, move.y, aiColor);
+      drawAIMarker(move);
+    }   
+    function drawAIMarker(move) {
+      const marker = document.createElement('div');
+      marker.className = 'ai-marker';
+      Object.assign(marker.style, {
+        position: 'absolute',
+        left: `${(move.y * CELL_SIZE) + CELL_SIZE/2 - 15}px`,
+        top: `${(move.x * CELL_SIZE) + CELL_SIZE/2 - 15}px`,
+        width: '30px',
+        height: '30px',
+        background: 'rgba(52, 152, 219, 0.8)',
+        borderRadius: '50%',
+        pointerEvents: 'none'
+      });
+      document.getElementById("boardContainer").appendChild(marker);
+      setTimeout(() => marker.remove(), 1000);
+    }
+    function isWinningMove(x, y, player) {
+      const directions = [[1,0], [0,1], [1,1], [1,-1]];
+      return directions.some(([dx, dy]) => {
+        let count = 1;
+        for (let i = 1; ; i++) {
+          const nx = x + dx * i, ny = y + dy * i;
+          if (!isValidCell(nx, ny) || board[nx][ny] !== player) break;
+          count++;
+        }
+        for (let i = 1; ; i++) {
+          const nx = x - dx * i, ny = y - dy * i;
+          if (!isValidCell(nx, ny) || board[nx][ny] !== player) break;
+          count++;
+        }
+        return count >= 5;
+      });
+    }
+    
+    function isValidCell(x, y) {
+      return x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE;
+    }
+    function drawBoard() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = '#666';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < BOARD_SIZE; i++) {
+        const pos = i * CELL_SIZE + CELL_SIZE/2;
+        ctx.beginPath();
+        ctx.moveTo(CELL_SIZE/2, pos);
+        ctx.lineTo(canvas.width - CELL_SIZE/2, pos);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(pos, CELL_SIZE/2);
+        ctx.lineTo(pos, canvas.height - CELL_SIZE/2);
+        ctx.stroke();
+      }
+      for (let i = 0; i < BOARD_SIZE; i++) {
+        for (let j = 0; j < BOARD_SIZE; j++) {
+          if (board[i][j] !== EMPTY) {
+            drawStone(i, j, board[i][j]);
+          }
+        }
+      }
+      if (hintPosition) {
+        drawStone(hintPosition.x, hintPosition.y, humanColor, true);
+      }
+    }
+    
+    function drawStone(x, y, color, isHint = false) {
+      ctx.beginPath();
+      ctx.arc(
+        y * CELL_SIZE + CELL_SIZE/2,
+        x * CELL_SIZE + CELL_SIZE/2,
+        CELL_SIZE * 0.4,
+        0,
+        Math.PI * 2
+      );
+      if (isHint) {
+        ctx.fillStyle = 'rgba(46, 204, 113, 0.7)';
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(39, 174, 96, 1)';
+      } else {
+        const gradient = ctx.createRadialGradient(
+          y * CELL_SIZE + CELL_SIZE/2,
+          x * CELL_SIZE + CELL_SIZE/2,
+          CELL_SIZE * 0.2,
+          y * CELL_SIZE + CELL_SIZE/2,
+          x * CELL_SIZE + CELL_SIZE/2,
+          CELL_SIZE * 0.4
+        );
+        gradient.addColorStop(0, color === BLACK ? '#2c3e50' : '#ecf0f1');
+        gradient.addColorStop(1, color === BLACK ? '#000' : '#bdc3c7');
+        ctx.fillStyle = gradient;
+        ctx.strokeStyle = '#666';
+      }
+      ctx.fill();
+      ctx.stroke();
+    }
+    function getCandidateMoves() {
+      const moves = [];
+      let hasNeighbor;
+      for (let i = 0; i < BOARD_SIZE; i++) {
+        for (let j = 0; j < BOARD_SIZE; j++) {
+          if (board[i][j] !== EMPTY) continue;
+          hasNeighbor = false;
+          for (let di = -1; di <= 1; di++) {
+            for (let dj = -1; dj <= 1; dj++) {
+              const ni = i + di, nj = j + dj;
+              if (isValidCell(ni, nj) && board[ni][nj] !== EMPTY) {
+                hasNeighbor = true;
+                break;
+              }
+            }
+            if (hasNeighbor) break;
+          }
+          if (hasNeighbor) moves.push({x: i, y: j});
+        }
+      }
+      if (moves.length === 0) {
+        moves.push({x: Math.floor(BOARD_SIZE/2), y: Math.floor(BOARD_SIZE/2)});
+      }
+      return moves;
+    }
+    function evaluateFor(color) {
+      let score = 0;
+      for (let i = 0; i < BOARD_SIZE; i++) {
+        for (let j = 0; j < BOARD_SIZE; j++) {
+          if (board[i][j] === color) {
+            const directions = [[1,0], [0,1], [1,1], [1,-1]];
+            for (const [dx, dy] of directions) {
+              const prevX = i - dx, prevY = j - dy;
+              if (isValidCell(prevX, prevY) && board[prevX][prevY] === color) continue;
+              let count = 0;
+              let x = i, y = j;
+              while (isValidCell(x, y) && board[x][y] === color) {
+                count++;
+                x += dx; y += dy;
+              }
+              if (count >= 5) return WIN_SCORE; 
+              score += patternScore[Math.min(count, 5)];
+            }
+          }
+        }
+      }
+      return score;
+    }
+    function evaluate() {
+      return evaluateFor(aiColor) - evaluateFor(humanColor);
+    }
+    function minimax(depth, alpha, beta, currentColor) {
+      if (depth === 0) {
+        return { score: evaluate(), move: null };
+      }
+      const candidateMoves = getCandidateMoves();
+      let bestMove = null;
+      if (currentColor === aiColor) { // 极大化
+        let maxEval = -Infinity;
+        for (const move of candidateMoves) {
+          board[move.x][move.y] = currentColor;
+          let score;
+          if (isWinningMove(move.x, move.y, currentColor)) {
+            score = WIN_SCORE;
+          } else {
+            score = minimax(depth - 1, alpha, beta, humanColor).score;
+          }
+          board[move.x][move.y] = EMPTY;
+          if (score > maxEval) {
+            maxEval = score;
+            bestMove = move;
+          }
+          alpha = Math.max(alpha, score);
+          if (beta <= alpha) break;
+        }
+        return { score: maxEval, move: bestMove };
+      } else { 
+        let minEval = Infinity;
+        for (const move of candidateMoves) {
+          board[move.x][move.y] = currentColor;
+          let score;
+          if (isWinningMove(move.x, move.y, currentColor)) {
+            score = -WIN_SCORE;
+          } else {
+            score = minimax(depth - 1, alpha, beta, aiColor).score;
+          }
+          board[move.x][move.y] = EMPTY;
+          if (score < minEval) {
+            minEval = score;
+            bestMove = move;
+          }
+          beta = Math.min(beta, score);
+          if (beta <= alpha) break;
+        }
+        return { score: minEval, move: bestMove };
+      }
+    }
+    function searchBestMove(color, depth) {
+      return minimax(depth, -Infinity, Infinity, color).move;
+    }
+    function showHint() {
+      if (gameOver) return;
+      const bestMove = searchBestMove(humanColor, maxDepth);
+      if (bestMove) {
+        hintPosition = bestMove;
+        drawBoard();
+      }
+    }
+    window.addEventListener('load', initBoard);
+    window.addEventListener('resize', () => {
+      canvasSize = Math.min(window.innerWidth * 0.9, 600);
+      CELL_SIZE = canvasSize / BOARD_SIZE;
+      canvas.width = canvasSize;
+      canvas.height = canvasSize;
+      drawBoard();
+    });
+  </script>
+</body>
+</html>
